@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Heasley's Egg Navigator
 // @namespace    egg.traverse
-// @version      1.6.4
+// @version      1.6.3
 // @description  Traverse every page in Torn in search for eggs
 // @author       Heasleys4hemp [1468764]; Antonio_Balloni [3853029]
 // @match        https://www.torn.com/*
