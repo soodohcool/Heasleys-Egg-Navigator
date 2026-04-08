@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Heasley's Egg Navigator
 // @namespace    egg.traverse
-// @version      1.6.3
+// @version      1.6.4
 // @description  Traverse every page in Torn in search for eggs
 // @author       Heasleys4hemp [1468764]; Antonio_Balloni [3853029]
 // @match        https://www.torn.com/*
@@ -22,29 +22,34 @@ Christmas Town does not spawn eggs. Source: CJ: https://www.torn.com/forums.php#
 */
 
 
+(function () {
 'use strict';
 
-var EEH_STORE_KEY = "eeh-store";
-var EEH_DEFAULT_RESET_HOLD_MS = 9800;
-var ButtonFloat;
-var ButtonFloatPos;
-var linkIndex;
-var eeh_float_drag;
-var eeh_float_x;
-var eeh_float_y;
-var eeh_pressTimer, eeh_anim_pressTimer;
-var eeh_reset_time = EEH_DEFAULT_RESET_HOLD_MS;
-var eeh_fade_in = 200;
-var eeh_is_disabled = false;
-var eeh_holding = false;
-var eeh_drag_state;
-var eeh_drag_persist_raf;
-var eeh_show_page_numbers;
+const EEH_STORE_KEY = "eeh-store";
+const EEH_DEFAULT_RESET_HOLD_MS = 9800;
+const eeh_fade_in = 200;
+
+let ButtonFloat;
+let ButtonFloatPos;
+let linkIndex;
+let eeh_float_drag;
+let eeh_float_x;
+let eeh_float_y;
+let eeh_pressTimer;
+let eeh_anim_pressTimer;
+let eeh_reset_time = EEH_DEFAULT_RESET_HOLD_MS;
+let eeh_is_disabled = false;
+let eeh_holding = false;
+let eeh_drag_state;
+let eeh_drag_persist_raf;
+let eeh_show_page_numbers;
+let eeh_resize_raf = null;
+let eeh_styles_injected = false;
 
 function clampResetHoldMs(ms) {
     if (ms == null || ms === "") return EEH_DEFAULT_RESET_HOLD_MS;
-    var n = parseInt(ms, 10);
-    if (isNaN(n)) return EEH_DEFAULT_RESET_HOLD_MS;
+    const n = parseInt(ms, 10);
+    if (Number.isNaN(n)) return EEH_DEFAULT_RESET_HOLD_MS;
     if (n < 500) return 500;
     if (n > 120000) return 120000;
     return n;
@@ -52,32 +57,41 @@ function clampResetHoldMs(ms) {
 
 // Turn whatever we read from disk into sane numbers / booleans so the rest of the script doesn't have to guess.
 function parseEehStore(raw) {
-    if (!raw || typeof raw !== "object") raw = {};
-    var floatMode = parseInt(raw.float, 10);
-    if (isNaN(floatMode)) floatMode = 0;
-    var cornerIndex = parseInt(raw.floatPos, 10);
-    if (isNaN(cornerIndex) || cornerIndex < 0 || cornerIndex > 3) cornerIndex = 0;
-    var storedIndex = raw.index;
+    const o = !raw || typeof raw !== "object" ? {} : raw;
+    let floatMode = parseInt(o.float, 10);
+    if (Number.isNaN(floatMode)) floatMode = 0;
+    let cornerIndex = parseInt(o.floatPos, 10);
+    if (Number.isNaN(cornerIndex) || cornerIndex < 0 || cornerIndex > 3) cornerIndex = 0;
+    let storedIndex = o.index;
     if (storedIndex == null || storedIndex === "") storedIndex = 0;
     else {
         storedIndex = parseInt(storedIndex, 10);
-        if (isNaN(storedIndex)) storedIndex = 0;
+        if (Number.isNaN(storedIndex)) storedIndex = 0;
     }
-    var dragEnabled = !!raw.drag;
-    var dragX = raw.dragX;
-    var dragY = raw.dragY;
-    if (dragX != null && !isNaN(Number(dragX))) dragX = Number(dragX);
+    const dragEnabled = !!o.drag;
+    let dragX = o.dragX;
+    let dragY = o.dragY;
+    if (dragX != null && !Number.isNaN(Number(dragX))) dragX = Number(dragX);
     else dragX = null;
-    if (dragY != null && !isNaN(Number(dragY))) dragY = Number(dragY);
+    if (dragY != null && !Number.isNaN(Number(dragY))) dragY = Number(dragY);
     else dragY = null;
-    var showNum = true;
-    if (raw.showNum === false) showNum = false;
-    var resetHoldMs = EEH_DEFAULT_RESET_HOLD_MS;
-    if (raw.resetHoldMs != null && raw.resetHoldMs !== "") {
-        var rh = parseInt(String(raw.resetHoldMs), 10);
-        if (!isNaN(rh)) resetHoldMs = rh;
+    const showNum = o.showNum !== false;
+    let resetHoldMs = EEH_DEFAULT_RESET_HOLD_MS;
+    if (o.resetHoldMs != null && o.resetHoldMs !== "") {
+        const rh = parseInt(String(o.resetHoldMs), 10);
+        if (!Number.isNaN(rh)) resetHoldMs = rh;
     }
-    return { v: 1, float: floatMode, floatPos: cornerIndex, index: storedIndex, drag: dragEnabled, dragX: dragX, dragY: dragY, showNum: showNum, resetHoldMs: resetHoldMs };
+    return {
+        v: 1,
+        float: floatMode,
+        floatPos: cornerIndex,
+        index: storedIndex,
+        drag: dragEnabled,
+        dragX,
+        dragY,
+        showNum,
+        resetHoldMs,
+    };
 }
 
 // Shove normalized store fields into the live globals (used everywhere else).
@@ -94,87 +108,107 @@ function applyStoreToGlobals(store) {
 
 // Write current globals to localStorage...skips if nothing changed so we don't spam storage events.
 function saveEehStore() {
-    var payload = {
+    const payload = {
         v: 1,
         float: ButtonFloat,
         floatPos: ButtonFloatPos,
         index: linkIndex,
         drag: !!eeh_float_drag,
-        dragX: eeh_float_x != null && !isNaN(Number(eeh_float_x)) ? Number(eeh_float_x) : null,
-        dragY: eeh_float_y != null && !isNaN(Number(eeh_float_y)) ? Number(eeh_float_y) : null,
+        dragX: eeh_float_x != null && !Number.isNaN(Number(eeh_float_x)) ? Number(eeh_float_x) : null,
+        dragY: eeh_float_y != null && !Number.isNaN(Number(eeh_float_y)) ? Number(eeh_float_y) : null,
         showNum: !!eeh_show_page_numbers,
         resetHoldMs: eeh_reset_time,
     };
     try {
-        var json = JSON.stringify(payload);
+        const json = JSON.stringify(payload);
         if (localStorage.getItem(EEH_STORE_KEY) === json) return;
         localStorage.setItem(EEH_STORE_KEY, json);
-    } catch (err) {}
+    } catch {
+    }
 }
 
 // Load on startup - prefer eeh-store, else migrate old split keys once and clean them up.
 function loadEehStore() {
     try {
-        var raw = localStorage.getItem(EEH_STORE_KEY);
+        const raw = localStorage.getItem(EEH_STORE_KEY);
         if (raw) {
             applyStoreToGlobals(parseEehStore(JSON.parse(raw)));
             return;
         }
-    } catch (err) {}
-    var legacyFloat = parseInt(localStorage.getItem("eeh-float"), 10);
-    if (isNaN(legacyFloat)) legacyFloat = 0;
-    var legacyCorner = parseInt(localStorage.getItem("eeh-float-pos"), 10);
-    if (isNaN(legacyCorner) || legacyCorner < 0 || legacyCorner > 3) legacyCorner = 0;
-    var legacyIndex = localStorage.getItem("eeh-index");
+    } catch {
+    }
+    let legacyFloat = parseInt(localStorage.getItem("eeh-float"), 10);
+    if (Number.isNaN(legacyFloat)) legacyFloat = 0;
+    let legacyCorner = parseInt(localStorage.getItem("eeh-float-pos"), 10);
+    if (Number.isNaN(legacyCorner) || legacyCorner < 0 || legacyCorner > 3) legacyCorner = 0;
+    let legacyIndex = localStorage.getItem("eeh-index");
     if (legacyIndex === null || legacyIndex === "") legacyIndex = 0;
     else {
         legacyIndex = parseInt(legacyIndex, 10);
-        if (isNaN(legacyIndex)) legacyIndex = 0;
+        if (Number.isNaN(legacyIndex)) legacyIndex = 0;
     }
-    applyStoreToGlobals(parseEehStore({ float: legacyFloat, floatPos: legacyCorner, index: legacyIndex, drag: false, dragX: null, dragY: null, showNum: true, resetHoldMs: EEH_DEFAULT_RESET_HOLD_MS }));
+    applyStoreToGlobals(
+        parseEehStore({
+            float: legacyFloat,
+            floatPos: legacyCorner,
+            index: legacyIndex,
+            drag: false,
+            dragX: null,
+            dragY: null,
+            showNum: true,
+            resetHoldMs: EEH_DEFAULT_RESET_HOLD_MS,
+        }),
+    );
     saveEehStore();
     try {
         localStorage.removeItem("eeh-float");
         localStorage.removeItem("eeh-float-pos");
         localStorage.removeItem("eeh-index");
-    } catch (err2) {}
+    } catch {
+    }
 }
 
 loadEehStore();
 
 try {
-    if (typeof GM == 'undefined') {
+    if (typeof GM === "undefined") {
         window.GM = {};
     }
-
-    if (typeof GM.addStyle == "undefined") { //Add GM.addStyle for browsers that do not support it (e.g. TornPDA, Firefox+Greasemonkey)
-        GM.addStyle = function (aCss) {
-            'use strict';
-            let style = document.createElement('style');
-            style.setAttribute('type', 'text/css');
+    if (typeof GM.addStyle === "undefined") { //Add GM.addStyle for browsers that do not support it (e.g. TornPDA, Firefox+Greasemonkey)
+        GM.addStyle = (aCss) => {
+            const style = document.createElement("style");
+            style.setAttribute("type", "text/css");
             style.textContent = aCss;
             document.head.appendChild(style);
             return style;
         };
     }
-} catch {}
+} catch {
+}
 
-if (typeof GM.registerMenuCommand != "undefined") {
-        GM.registerMenuCommand('Toggle Floating Button', toggleFloatButton,
-                               {
-            autoClose: false
-        }
-                              );
+if (typeof GM.registerMenuCommand !== "undefined") {
+    GM.registerMenuCommand("Toggle Floating Button", toggleFloatButton, {
+        autoClose: false,
+    });
+    GM.registerMenuCommand("Toggle Float Position", toggleFloatPosition, {
+        autoClose: false,
+    });
+}
 
-        GM.registerMenuCommand('Toggle Float Position', toggleFloatPosition,
-                               {
-            autoClose: false
-        }
-                              );
+const obs_ops = { attributes: false, childList: true, characterData: false, subtree: true };
+
+function jQueryLoaded() {
+    return typeof window.$ === "function";
+}
+
+function applyWrapPositionPx(wrapElement, left, top, resetOppositeAnchors) {
+    wrapElement.style.setProperty("left", `${left}px`, "important");
+    wrapElement.style.setProperty("top", `${top}px`, "important");
+    if (resetOppositeAnchors) {
+        wrapElement.style.setProperty("right", "auto", "important");
+        wrapElement.style.setProperty("bottom", "auto", "important");
     }
-
-
-const obs_ops = {attributes: false, childList: true, characterData: false, subtree:true};
+}
 
 // Cap the gutter so a stale clientWidth (multiple monitors) never wipes the whole width.
 const eeh_max_scrollbar_gutter = 48;
@@ -258,14 +292,14 @@ const EVERY_LINK = ["", "index.php","forums.php#/p=threads&f=67&t=16326854&b=0&a
                     "/war.php?step=chainreport&chainID=69420", "page.php?sid=keepsakes",
                     "page.php?sid=crimes2","authenticate.php"];
 
-const eeeh_options_observer = new MutationObserver(function(mutations) {
+const FLOAT_POS_LABELS = ["bottom left", "top left", "bottom right", "top right"];
+
+const eeeh_options_observer = new MutationObserver(() => {
     const url = window.location.href;
     if (url.includes("forums.php")) {
-        if (url.includes("f=67&t=16326854") && $('li.parent-post[data-id="23383506"]').length) {
-            if (typeof window.$ === 'function') { // Double check jQuery has loaded for TornPDA to stop being a whiny piece of shit
-                if (!document.getElementsByClassName("eeh-options").length) {
-                    insertOptions();
-                }
+        if (url.includes("f=67&t=16326854") && $("li.parent-post[data-id=\"23383506\"]").length) {
+            if (jQueryLoaded()) { // Double check jQuery has loaded for TornPDA to stop being a whiny piece of shit
+                if (!document.getElementsByClassName("eeh-options").length) insertOptions();
                 eeeh_options_observer.disconnect();
             }
         }
@@ -274,10 +308,10 @@ const eeeh_options_observer = new MutationObserver(function(mutations) {
     }
 });
 
-const eeh_preferences_observer = new MutationObserver(function() {
+const eeh_preferences_observer = new MutationObserver(() => {
     const url = window.location.href;
     if (!url.includes("preferences.php")) return;
-    if (typeof window.$ !== "function") return;
+    if (!jQueryLoaded()) return;
     if (document.getElementById("eeh-preferences-panel")) {
         eeh_preferences_observer.disconnect();
         return;
@@ -287,39 +321,26 @@ const eeh_preferences_observer = new MutationObserver(function() {
     eeh_preferences_observer.disconnect();
 });
 
-const eeeh_observer = new MutationObserver(function(mutations) {
+const eeeh_observer = new MutationObserver(() => {
     if (document.getElementById("eggTraverse")) {
         eeeh_observer.disconnect();
         return;
     }
-
-    if (typeof window.$ === 'function') { // Double check jQuery has loaded for TornPDA to stop being a whiny piece of shit
-        if (ButtonFloat) {
-            // Insert into sidebar
-            if (document.querySelector('#sidebar > div:first-of-type')) {
-                insertNormal(); // Insert normal sidebar version
-                eeeh_observer.disconnect();
-                return;
-            }
-        } else {
-            //insert floating button
-            if (document.getElementsByTagName('body')[0]) {
-                insertFloat();
-                eeeh_observer.disconnect();
-                return;
-            }
+    if (!jQueryLoaded()) return; // Double check jQuery has loaded for TornPDA to stop being a whiny piece of shit
+    if (ButtonFloat) {
+        // Insert into sidebar
+        if (document.querySelector("#sidebar > div:first-of-type")) {
+            insertNormal(); // Insert normal sidebar version
+            eeeh_observer.disconnect();
         }
+    } else if (document.body) {
+        //insert floating button
+        insertFloat();
+        eeeh_observer.disconnect();
     }
 });
 
-
-window.addEventListener(
-    "hashchange",
-    () => {
-        hashChanged();
-    },
-    false,
-);
+window.addEventListener("hashchange", hashChanged, false);
 window.addEventListener("resize", queueClampFloatOnResize, false);
 window.addEventListener("orientationchange", queueClampFloatOnResize, false);
 window.addEventListener("focus", queueClampFloatOnResize, false);
@@ -333,33 +354,26 @@ eeh_preferences_observer.observe(document, obs_ops);
 
 function hashChanged() {
     const pageUrl = window.location.href;
-    if (pageUrl.includes("forums.php")) {
-        eeeh_options_observer.observe(document, obs_ops);
-    }
+    if (pageUrl.includes("forums.php")) eeeh_options_observer.observe(document, obs_ops);
     if (pageUrl.includes("preferences.php") && !document.getElementById("eeh-preferences-panel")) {
         eeh_preferences_observer.observe(document, obs_ops);
     }
     if (eeh_is_disabled) {
         setTimeout(() => {
             eeh_is_disabled = false;
-        }, "1000");
+        }, 1000);
     }
 }
 
 function eggLinkText(eggButtonType) {
     if (!eeh_show_page_numbers) {
-        if (eggButtonType == "float") return "";
-        return "Egg Navigator";
+        return eggButtonType === "float" ? "" : "Egg Navigator";
     }
-    let eggLabel = `Egg Navigator (${linkIndex}/${EVERY_LINK.length})`;
-    if (eggButtonType == "float") {
-        eggLabel = `${linkIndex}`;
-    }
-    return eggLabel;
+    return eggButtonType === "float" ? String(linkIndex) : `Egg Navigator (${linkIndex}/${EVERY_LINK.length})`;
 }
 
 function updateEggLabels(eggButtonType) {
-    var eggTraverse = $("#eggTraverse");
+    const eggTraverse = $("#eggTraverse");
     if (!eggTraverse.length) return;
     eggTraverse.find(".eeh-name").text(eggLinkText(eggButtonType));
     if (eggButtonType === "float") {
@@ -368,80 +382,78 @@ function updateEggLabels(eggButtonType) {
     } else {
         eggTraverse.removeClass("eeh-hide-page-nums");
     }
-    if (eggButtonType === "float" && eeh_show_page_numbers) {
-        ensureFloatOnScreenAfterLayout();
-    }
+    if (eggButtonType === "float" && eeh_show_page_numbers) ensureFloatOnScreenAfterLayout();
 }
 
 function setEggTraverseClickEvent(eggButtonType) {
-    var eggTraverse = $('#eggTraverse');
-    var eggIcon = eggTraverse.find('.eeh-icon');
-    eggTraverse.on('mousedown touchstart', function(e) {
-        if (eeh_drag_state) return;
-        eeh_anim_pressTimer = window.setTimeout(function() {
+    const eggTraverse = $("#eggTraverse");
+    const eggIcon = eggTraverse.find(".eeh-icon");
+    eggTraverse
+        .on("mousedown touchstart", () => {
             if (eeh_drag_state) return;
-            eeh_holding = true;
-            eggIcon.fadeOut(eeh_reset_time);
-
-            eeh_pressTimer = window.setTimeout(function() {
-                if (eeh_holding && !eeh_drag_state) {
-                    linkIndex = 0;
-                    eggIcon.fadeIn(eeh_fade_in);
-                    saveEehStore();
-                    eggTraverse.attr('href', EVERY_LINK[0]);
-                    updateEggLabels(eggButtonType);
-                }
-            }, eeh_reset_time);
-
-        }, eeh_fade_in);
-    }).on('mouseup touchend mouseleave', function(e){
-        clearTimeout(eeh_anim_pressTimer);
-        if (eeh_holding) {
-            clearTimeout(eeh_pressTimer);
-            eeh_holding = false;
-            eggIcon.stop(true, true).fadeIn(eeh_fade_in);
-        }
-    }).contextmenu(function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        return false;
-    }).on('click', function(e) {
-        if (eeh_drag_state) return;
-        if (eeh_holding) {
-            eeh_holding = false;
-            eggIcon.stop(true, true).fadeIn(eeh_fade_in);
-        }
-        if (window.event.ctrlKey) {
-            //ctrl was held down during the click
-            incrementEggTraverse(eggButtonType);
-        } else {
-            //normal click
-            if (!eeh_is_disabled) {
-                eeh_is_disabled = true;
+            eeh_anim_pressTimer = window.setTimeout(() => {
+                if (eeh_drag_state) return;
+                eeh_holding = true;
+                eggIcon.fadeOut(eeh_reset_time);
+                eeh_pressTimer = window.setTimeout(() => {
+                    if (eeh_holding && !eeh_drag_state) {
+                        linkIndex = 0;
+                        eggIcon.fadeIn(eeh_fade_in);
+                        saveEehStore();
+                        eggTraverse.attr("href", EVERY_LINK[0]);
+                        updateEggLabels(eggButtonType);
+                    }
+                }, eeh_reset_time);
+            }, eeh_fade_in);
+        })
+        .on("mouseup touchend mouseleave", () => {
+            clearTimeout(eeh_anim_pressTimer);
+            if (eeh_holding) {
+                clearTimeout(eeh_pressTimer);
+                eeh_holding = false;
+                eggIcon.stop(true, true).fadeIn(eeh_fade_in);
+            }
+        })
+        .contextmenu((e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        })
+        .on("click", (e) => {
+            if (eeh_drag_state) return;
+            if (eeh_holding) {
+                eeh_holding = false;
+                eggIcon.stop(true, true).fadeIn(eeh_fade_in);
+            }
+            if (e.ctrlKey || (e.originalEvent && e.originalEvent.ctrlKey)) {
+                //ctrl was held down during the click
                 incrementEggTraverse(eggButtonType);
             } else {
-                e.preventDefault();
+                //normal click
+                if (!eeh_is_disabled) {
+                    eeh_is_disabled = true;
+                    incrementEggTraverse(eggButtonType);
+                } else {
+                    e.preventDefault();
+                }
             }
-        }
-    });
+        });
 }
 
 function incrementEggTraverse(eggButtonType) {
-    var eggTraverse = $('#eggTraverse');
-    linkIndex++;
-    if (linkIndex >= EVERY_LINK.length) linkIndex = 0;
+    const eggTraverse = $("#eggTraverse");
+    linkIndex = (linkIndex + 1) % EVERY_LINK.length;
     saveEehStore();
-    eggTraverse.attr('href', EVERY_LINK[linkIndex]);
+    eggTraverse.attr("href", EVERY_LINK[linkIndex]);
     updateEggLabels(eggButtonType);
 }
 
 // After storage or cross-tab updates - point the link at EVERY_LINK[linkIndex] and refresh the visible label text.
 function syncEggFromStore() {
-    var eggLink = document.getElementById("eggTraverse");
+    const eggLink = document.getElementById("eggTraverse");
     if (!eggLink) return;
-    var targetHref = EVERY_LINK[linkIndex];
-    eggLink.setAttribute("href", targetHref);
+    eggLink.setAttribute("href", EVERY_LINK[linkIndex]);
     updateEggLabels(eggLink.classList.contains("eeh-float") ? "float" : "sidebar");
 }
 
@@ -450,17 +462,18 @@ function insertNormal() {
     if (!document.getElementById("eggTraverse")) {
         let href = EVERY_LINK[linkIndex];
 
-        let sidebarEggHtml = `<div class="eeh-link">
-                               <a href="${href}" id="eggTraverse">
-                                   <span class="eeh-icon">${easteregg_svg}</span>
-                                   <span class="eeh-name">${eggLinkText("sidebar")}</span>
-                               </a>
-                           </div>`;
+        const sidebarEggHtml = `
+            <div class="eeh-link">
+                <a href="${href}" id="eggTraverse">
+                    <span class="eeh-icon">${easteregg_svg}</span>
+                    <span class="eeh-name">${eggLinkText("sidebar")}</span>
+                </a>
+            </div>`.replace(/>\s+</g, "><");
 
-        const sidebar = document.getElementById('sidebar');
+        const sidebar = document.getElementById("sidebar");
         if (sidebar.firstChild) {
             // Insert the easterspans HTML string after the first child element of sidebar
-            $('#sidebar > *').first().after(sidebarEggHtml);
+            $("#sidebar > *").first().after(sidebarEggHtml);
             setEggTraverseClickEvent("sidebar");
         }
         insertStyle();
@@ -472,27 +485,24 @@ function insertFloat() {
     console.log("[Heasley][Egg Navigator] Inserting floating button...");
     if (!document.getElementById("eggTraverse")) {
         let href = EVERY_LINK[linkIndex];
-        var floatNumClass = eeh_show_page_numbers ? "eeh-float" : "eeh-float eeh-hide-page-nums";
-        const floatWrapHtml =
-            '<div id="eeh-float-wrap" class="eeh-float-wrap">' +
-            '<button type="button" id="eeh-drag-handle" class="eeh-drag-handle" aria-label="Move floating button">\u22ee</button>' +
-            `<a href="${href}" id="eggTraverse" class="${floatNumClass}">
-                               <span class="eeh-icon">${easteregg_svg}</span>
-                               <span class="eeh-wrap">
-                                   <span class="eeh-name">${eeh_show_page_numbers ? linkIndex : ""}</span>
-                                   <span class="eeh-total">${eeh_show_page_numbers ? EVERY_LINK.length : ""}</span>
-                               </span>
-                           </a>` +
-            "</div>";
+        const floatNumClass = eeh_show_page_numbers ? "eeh-float" : "eeh-float eeh-hide-page-nums";
+        const floatWrapHtml = `
+            <div id="eeh-float-wrap" class="eeh-float-wrap">
+                <button type="button" id="eeh-drag-handle" class="eeh-drag-handle" aria-label="Move floating button">\u22ee</button>
+                <a href="${href}" id="eggTraverse" class="${floatNumClass}">
+                    <span class="eeh-icon">${easteregg_svg}</span>
+                    <span class="eeh-wrap">
+                        <span class="eeh-name">${eeh_show_page_numbers ? linkIndex : ""}</span>
+                        <span class="eeh-total">${eeh_show_page_numbers ? EVERY_LINK.length : ""}</span>
+                    </span>
+                </a>
+            </div>`.replace(/>\s+</g, "><");
 
-        $('body').append(floatWrapHtml);
+        $("body").append(floatWrapHtml);
 
         insertStyle();
         setFloatPosition();
         setEggTraverseClickEvent("float");
-        if (eeh_float_drag && eeh_float_x != null && eeh_float_y != null) {
-            setFloatPosition();
-        }
         if (eeh_show_page_numbers) {
             ensureFloatOnScreenAfterLayout();
         }
@@ -503,70 +513,42 @@ function insertFloat() {
 function insertOptions() {
     console.log("[Heasley][Egg Navigator] Inserting options...");
     if (!document.getElementsByClassName("eeh-options").length) {
-        const post = $('li.parent-post[data-id="23383506"]').find('div.post-container div.post');
+        const post = $("li.parent-post[data-id=\"23383506\"]").find("div.post-container div.post");
         let enabled_float = ButtonFloat ? "disabled" : "enabled";
         let enabledClass_float = ButtonFloat ? "eeh-red" : "eeh-green";
 
-        let enabled_float_pos;
-
-        switch(ButtonFloatPos) {
-            case 0:
-                enabled_float_pos = "bottom left";
-                break;
-            case 1:
-                enabled_float_pos = "top left";
-                break;
-            case 2:
-                enabled_float_pos = "bottom right";
-                break;
-            case 3:
-                enabled_float_pos = "top right";
-                break;
-        }
+        const enabled_float_pos = FLOAT_POS_LABELS[ButtonFloatPos] || FLOAT_POS_LABELS[0];
 
         post.before(`
             <div class="eeh-control-panel">
                 <h1 class="eeh-head">Heasley's Egg Navigator</h1>
                 <p class="eeh-subline">CONTROL PANEL</p>
                 <hr class="eeh-divider">
-                <div class="eeh-options"><button id="eeh-float-toggle">Toggle float button</button>
+                <div class="eeh-options">
+                    <button id="eeh-float-toggle">Toggle float button</button>
                     <p>FLOAT BUTTON: <span id="eeh-float-toggle-label" class="${enabledClass_float}">${enabled_float}</span></p>
                 </div>
-                <div class="eeh-options"><button id="eeh-float-pos-toggle">Toggle position</button>
+                <div class="eeh-options">
+                    <button id="eeh-float-pos-toggle">Toggle position</button>
                     <p>FLOAT POSITION: <span id="eeh-float-pos-toggle-label">${enabled_float_pos}</span></p>
                 </div>
-           </div>
-        `);
+            </div>`.replace(/>\s+</g, "><"));
 
-        $('#eeh-float-toggle').click(function() {
-            let label = $('#eeh-float-toggle-label');
+        $("#eeh-float-toggle").click(function () {
+            const label = $("#eeh-float-toggle-label");
             if (toggleFloatButton()) {
                 label.text("disabled");
             } else {
                 label.text("enabled");
             }
-            label.toggleClass('eeh-green eeh-red');
+            label.toggleClass("eeh-green eeh-red");
             syncPrefsPanel();
         });
 
-        $('#eeh-float-pos-toggle').click(function() {
-            let label = $('#eeh-float-pos-toggle-label');
-            switch(toggleFloatPosition()) {
-                case 0:
-                    label.text("bottom left");
-                    break;
-                case 1:
-                    label.text("top left");
-                    break;
-                case 2:
-                    label.text("bottom right");
-                    break;
-                case 3:
-                    label.text("top right");
-                    break;
-                default:
-                    label.text("disabled");
-            }
+        $("#eeh-float-pos-toggle").click(function () {
+            const label = $("#eeh-float-pos-toggle-label");
+            const pos = toggleFloatPosition();
+            label.text(pos !== undefined ? FLOAT_POS_LABELS[pos] || "disabled" : "disabled");
             syncPrefsPanel();
         });
         eeeh_options_observer.disconnect();
@@ -575,25 +557,25 @@ function insertOptions() {
 
 // If the prefs panel is open, make checkboxes/radios reflect what's in memory after load or remote change.
 function syncPrefsPanel() {
-    var panelRoot = document.getElementById("eeh-preferences-panel");
+    const panelRoot = document.getElementById("eeh-preferences-panel");
     if (!panelRoot) return;
-    var floatToggle = document.getElementById("eeh-prefs-float-enabled");
+    const floatToggle = document.getElementById("eeh-prefs-float-enabled");
     if (floatToggle) floatToggle.checked = ButtonFloat === 0;
-    var dragToggle = document.getElementById("eeh-prefs-float-drag");
+    const dragToggle = document.getElementById("eeh-prefs-float-drag");
     if (dragToggle) dragToggle.checked = !!eeh_float_drag;
-    var numToggle = document.getElementById("eeh-prefs-show-page-numbers");
+    const numToggle = document.getElementById("eeh-prefs-show-page-numbers");
     if (numToggle) numToggle.checked = !!eeh_show_page_numbers;
-    var cornerRadios = panelRoot.querySelectorAll('input[name="eeh-prefs-corner"]');
-    for (var radioIndex = 0; radioIndex < cornerRadios.length; radioIndex++) {
-        cornerRadios[radioIndex].checked = String(ButtonFloatPos) === cornerRadios[radioIndex].value;
+    const cornerRadios = panelRoot.querySelectorAll('input[name="eeh-prefs-corner"]');
+    for (const radio of cornerRadios) {
+        radio.checked = String(ButtonFloatPos) === radio.value;
     }
-    var holdMsInput = document.getElementById("eeh-prefs-reset-hold-ms");
+    const holdMsInput = document.getElementById("eeh-prefs-reset-hold-ms");
     if (holdMsInput) holdMsInput.value = String(eeh_reset_time);
 }
 
 // One-time hooks on the real preferences UI - float vs sidebar, drag, corner radios.
 function bindPrefsPanel() {
-    var panelRoot = document.getElementById("eeh-preferences-panel");
+    const panelRoot = document.getElementById("eeh-preferences-panel");
     if (!panelRoot) return;
 
     $("#eeh-prefs-float-enabled")
@@ -608,7 +590,7 @@ function bindPrefsPanel() {
             eeh_show_page_numbers = !!this.checked;
             saveEehStore();
             if (document.getElementById("eggTraverse")) {
-                var isFloat = document.getElementById("eggTraverse").classList.contains("eeh-float");
+                const isFloat = document.getElementById("eggTraverse").classList.contains("eeh-float");
                 updateEggLabels(isFloat ? "float" : "sidebar");
             }
             if (!eeh_show_page_numbers && !eeh_float_drag) {
@@ -637,7 +619,7 @@ function bindPrefsPanel() {
         .on("change.eehprefs", function () {
             if (!this.checked) return;
             ButtonFloatPos = parseInt(this.value, 10);
-            if (isNaN(ButtonFloatPos)) ButtonFloatPos = 0;
+            if (Number.isNaN(ButtonFloatPos)) ButtonFloatPos = 0;
             if (ButtonFloatPos >= 4) ButtonFloatPos = 0;
             eeh_float_x = null;
             eeh_float_y = null;
@@ -648,7 +630,7 @@ function bindPrefsPanel() {
     $("#eeh-prefs-reset-hold-ms")
         .off("change.eehprefs blur.eehprefs")
         .on("change.eehprefs blur.eehprefs", function () {
-            var v = clampResetHoldMs(this.value);
+            const v = clampResetHoldMs(this.value);
             this.value = String(v);
             eeh_reset_time = v;
             saveEehStore();
@@ -659,9 +641,9 @@ function bindPrefsPanel() {
 
 // Sidebar mode = ButtonFloat 1, floating = 0...if we're already on the right mode and the DOM matches, bail early.
 function setEggBarDock(isSidebar) {
-    var nextMode = isSidebar ? 1 : 0;
+    const nextMode = isSidebar ? 1 : 0;
     if (ButtonFloat === nextMode) {
-        var buttonAlreadyPresent = nextMode === 1
+        const buttonAlreadyPresent = nextMode === 1
             ? !!document.getElementById("eggTraverse")
             : !!document.getElementById("eeh-float-wrap");
         if (buttonAlreadyPresent) return;
@@ -679,14 +661,12 @@ function setEggBarDock(isSidebar) {
 
 // Keep the whole float strip inside the visible viewport - uses layout width/height so clamp matches what you see.
 function clampWrapInViewport(wrapElement, left, top) {
-    var bounds = wrapElement.getBoundingClientRect();
-    var width = bounds.width || wrapElement.offsetWidth;
-    var height = bounds.height || wrapElement.offsetHeight;
-    var vp = viewportInnerSize();
-    var viewportWidth = vp.w;
-    var viewportHeight = vp.h;
-    var maxLeft = Math.max(0, viewportWidth - width);
-    var maxTop = Math.max(0, viewportHeight - height);
+    const bounds = wrapElement.getBoundingClientRect();
+    const width = bounds.width || wrapElement.offsetWidth;
+    const height = bounds.height || wrapElement.offsetHeight;
+    const { w: viewportWidth, h: viewportHeight } = viewportInnerSize();
+    const maxLeft = Math.max(0, viewportWidth - width);
+    const maxTop = Math.max(0, viewportHeight - height);
     return {
         left: Math.round(Math.min(Math.max(0, left), maxLeft)),
         top: Math.round(Math.min(Math.max(0, top), maxTop)),
@@ -696,35 +676,29 @@ function clampWrapInViewport(wrapElement, left, top) {
 // After page numbers widen the float, corner CSS can leave it past an edge - snap to clamped left/top and persist.
 function ensureFloatOnScreen() {
     if (ButtonFloat !== 0 || !eeh_show_page_numbers) return;
-    var w = document.getElementById("eeh-float-wrap");
+    const w = document.getElementById("eeh-float-wrap");
     if (!w) return;
-    var r = w.getBoundingClientRect();
-    var c = clampWrapInViewport(w, Math.round(r.left), Math.round(r.top));
+    const r = w.getBoundingClientRect();
+    const c = clampWrapInViewport(w, Math.round(r.left), Math.round(r.top));
     if (Math.abs(c.left - r.left) < 1 && Math.abs(c.top - r.top) < 1) return;
     w.classList.remove("eeh-float-bottom", "eeh-float-top", "eeh-float-left", "eeh-float-right");
     w.classList.add("eeh-float-custom");
-    w.style.setProperty("left", c.left + "px", "important");
-    w.style.setProperty("top", c.top + "px", "important");
-    w.style.setProperty("right", "auto", "important");
-    w.style.setProperty("bottom", "auto", "important");
+    applyWrapPositionPx(w, c.left, c.top, true);
     eeh_float_x = c.left;
     eeh_float_y = c.top;
     updateHandleSide(w);
-    if (typeof window.$ === "function") bindFloatDrag();
+    if (jQueryLoaded()) bindFloatDrag();
     saveEehStore();
 }
 
 function ensureFloatOnScreenAfterLayout() {
-    requestAnimationFrame(function () {
-        requestAnimationFrame(ensureFloatOnScreen);
-    });
+    requestAnimationFrame(() => requestAnimationFrame(ensureFloatOnScreen));
 }
 
-var eeh_resize_raf = null;
 function queueClampFloatOnResize() {
     if (ButtonFloat !== 0) return;
     if (eeh_resize_raf != null) return;
-    eeh_resize_raf = requestAnimationFrame(function () {
+    eeh_resize_raf = requestAnimationFrame(() => {
         eeh_resize_raf = null;
         clampFloatOnResize();
     });
@@ -734,31 +708,28 @@ function queueClampFloatOnResize() {
 function clampFloatOnResize() {
     if (ButtonFloat !== 0) return;
     if (eeh_drag_state) return;
-    var w = document.getElementById("eeh-float-wrap");
+    const w = document.getElementById("eeh-float-wrap");
     if (!w) return;
 
-    var left;
-    var top;
+    let left;
+    let top;
     if (eeh_float_x != null && eeh_float_y != null) {
         left = eeh_float_x;
         top = eeh_float_y;
     } else {
-        var r = w.getBoundingClientRect();
+        const r = w.getBoundingClientRect();
         left = Math.round(r.left);
         top = Math.round(r.top);
     }
-    var c = clampWrapInViewport(w, left, top);
+    const c = clampWrapInViewport(w, left, top);
     if (c.left !== left || c.top !== top) {
         w.classList.remove("eeh-float-bottom", "eeh-float-top", "eeh-float-left", "eeh-float-right");
         w.classList.add("eeh-float-custom");
-        w.style.setProperty("left", c.left + "px", "important");
-        w.style.setProperty("top", c.top + "px", "important");
-        w.style.setProperty("right", "auto", "important");
-        w.style.setProperty("bottom", "auto", "important");
+        applyWrapPositionPx(w, c.left, c.top, true);
         eeh_float_x = c.left;
         eeh_float_y = c.top;
         updateHandleSide(w);
-        if (typeof window.$ === "function") bindFloatDrag();
+        if (jQueryLoaded()) bindFloatDrag();
         saveEehStore();
     }
     if (eeh_show_page_numbers) {
@@ -773,12 +744,12 @@ function updateHandleSide(wrap) {
         wrap.classList.remove("eeh-handle-left", "eeh-handle-right");
         return;
     }
-    var handleOnRightOfPill;
+    let handleOnRightOfPill;
     if (eeh_float_x != null && eeh_float_y != null) {
-        var viewportWidth = viewportInnerSize().w;
-        var wrapBounds = wrap.getBoundingClientRect();
+        const viewportWidth = viewportInnerSize().w;
+        const wrapBounds = wrap.getBoundingClientRect();
         if (wrapBounds.width > 0 && viewportWidth > 0) {
-            var centerX = wrapBounds.left + wrapBounds.width / 2;
+            const centerX = wrapBounds.left + wrapBounds.width / 2;
             handleOnRightOfPill = centerX < viewportWidth / 2;
         } else {
             handleOnRightOfPill = ButtonFloatPos === 0 || ButtonFloatPos === 1;
@@ -797,24 +768,23 @@ function updateHandleSide(wrap) {
 function onFloatDragMove(e) {
     if (!eeh_drag_state) return;
     e.preventDefault();
-    var nativeEvent = e.originalEvent || e;
-    var touch = (nativeEvent.touches && nativeEvent.touches[0]) || (nativeEvent.changedTouches && nativeEvent.changedTouches[0]);
-    var pointerX = touch ? touch.clientX : e.clientX;
-    var pointerY = touch ? touch.clientY : e.clientY;
+    const nativeEvent = e.originalEvent || e;
+    const touch = (nativeEvent.touches && nativeEvent.touches[0]) || (nativeEvent.changedTouches && nativeEvent.changedTouches[0]);
+    const pointerX = touch ? touch.clientX : e.clientX;
+    const pointerY = touch ? touch.clientY : e.clientY;
     if (pointerX == null) return;
-    var wrapElement = eeh_drag_state.wrapElement;
-    var nextLeft = Math.round(pointerX - eeh_drag_state.grabOffsetX);
-    var nextTop = Math.round(pointerY - eeh_drag_state.grabOffsetY);
-    var clamped = clampWrapInViewport(wrapElement, nextLeft, nextTop);
+    const wrapElement = eeh_drag_state.wrapElement;
+    const nextLeft = Math.round(pointerX - eeh_drag_state.grabOffsetX);
+    const nextTop = Math.round(pointerY - eeh_drag_state.grabOffsetY);
+    const clamped = clampWrapInViewport(wrapElement, nextLeft, nextTop);
     // Re-base grab point from clamped top-left each frame so sliding along an edge doesn't corrupt offset.
     eeh_drag_state.grabOffsetX = pointerX - clamped.left;
     eeh_drag_state.grabOffsetY = pointerY - clamped.top;
-    wrapElement.style.setProperty("left", clamped.left + "px", "important");
-    wrapElement.style.setProperty("top", clamped.top + "px", "important");
+    applyWrapPositionPx(wrapElement, clamped.left, clamped.top, false);
     eeh_float_x = clamped.left;
     eeh_float_y = clamped.top;
     if (!eeh_drag_persist_raf) {
-        eeh_drag_persist_raf = requestAnimationFrame(function () {
+        eeh_drag_persist_raf = requestAnimationFrame(() => {
             eeh_drag_persist_raf = null;
             if (eeh_drag_state) saveEehStore();
         });
@@ -828,13 +798,12 @@ function onFloatDragEnd() {
     }
     $(document).off("mousemove.eehdrag touchmove.eehdrag mouseup.eehdrag touchend.eehdrag touchcancel.eehdrag");
     if (!eeh_drag_state) return;
-    var wrapElement = eeh_drag_state.wrapElement;
-    var bounds = wrapElement.getBoundingClientRect();
-    var clamped = clampWrapInViewport(wrapElement, bounds.left, bounds.top);
+    const wrapElement = eeh_drag_state.wrapElement;
+    const bounds = wrapElement.getBoundingClientRect();
+    const clamped = clampWrapInViewport(wrapElement, bounds.left, bounds.top);
     eeh_float_x = clamped.left;
     eeh_float_y = clamped.top;
-    wrapElement.style.setProperty("left", clamped.left + "px", "important");
-    wrapElement.style.setProperty("top", clamped.top + "px", "important");
+    applyWrapPositionPx(wrapElement, clamped.left, clamped.top, false);
     updateHandleSide(wrapElement);
     saveEehStore();
     eeh_drag_state = null;
@@ -842,8 +811,8 @@ function onFloatDragEnd() {
 
 // (Re)attach handle listeners after DOM rebuilds...namespaced so we don't stack duplicate handlers.
 function bindFloatDrag() {
-    var $floatWrap = $("#eeh-float-wrap");
-    var $dragHandle = $("#eeh-drag-handle");
+    const $floatWrap = $("#eeh-float-wrap");
+    const $dragHandle = $("#eeh-drag-handle");
     $dragHandle.off("mousedown.eehdrag touchstart.eehdrag");
     $floatWrap.removeClass("eeh-drag-active eeh-handle-left eeh-handle-right");
     if (!eeh_float_drag || !$floatWrap.length) return;
@@ -854,21 +823,18 @@ function bindFloatDrag() {
         e.preventDefault();
         e.stopPropagation();
         if (e.type === "mousedown" && e.which !== 1) return;
-        var wrapElement = $floatWrap[0];
-        var pointer = e.originalEvent && e.originalEvent.touches ? e.originalEvent.touches[0] : e;
-        var startBounds = wrapElement.getBoundingClientRect();
-        var clampedStart = clampWrapInViewport(wrapElement, startBounds.left, startBounds.top);
+        const wrapElement = $floatWrap[0];
+        const pointer = e.originalEvent && e.originalEvent.touches ? e.originalEvent.touches[0] : e;
+        const startBounds = wrapElement.getBoundingClientRect();
+        const clampedStart = clampWrapInViewport(wrapElement, startBounds.left, startBounds.top);
         eeh_float_x = clampedStart.left;
         eeh_float_y = clampedStart.top;
         wrapElement.classList.remove("eeh-float-bottom", "eeh-float-top");
         wrapElement.classList.add("eeh-float-custom");
-        wrapElement.style.setProperty("left", clampedStart.left + "px", "important");
-        wrapElement.style.setProperty("top", clampedStart.top + "px", "important");
-        wrapElement.style.setProperty("right", "auto", "important");
-        wrapElement.style.setProperty("bottom", "auto", "important");
+        applyWrapPositionPx(wrapElement, clampedStart.left, clampedStart.top, true);
         saveEehStore();
         updateHandleSide(wrapElement);
-        var boundsAfterSync = wrapElement.getBoundingClientRect();
+        const boundsAfterSync = wrapElement.getBoundingClientRect();
         clearTimeout(eeh_anim_pressTimer);
         clearTimeout(eeh_pressTimer);
         if (eeh_holding) {
@@ -887,11 +853,11 @@ function bindFloatDrag() {
 
 // Make the live page match ButtonFloat - inject sidebar vs float, or just refresh href/label if the right shell is already there.
 function syncEggUi() {
-    if (typeof window.$ !== "function") return;
+    if (!jQueryLoaded()) return;
 
-    var useSidebar = ButtonFloat === 1;
-    var floatWrap = document.getElementById("eeh-float-wrap");
-    var eggLink = document.getElementById("eggTraverse");
+    const useSidebar = ButtonFloat === 1;
+    const floatWrap = document.getElementById("eeh-float-wrap");
+    const eggLink = document.getElementById("eggTraverse");
 
     if (useSidebar) {
         if (!eggLink) {
@@ -904,10 +870,10 @@ function syncEggUi() {
         }
     } else {
         if (!eggLink) {
-            if (document.getElementsByTagName("body")[0]) insertFloat();
+            if (document.body) insertFloat();
         } else if (!floatWrap) {
             killButton();
-            if (document.getElementsByTagName("body")[0]) insertFloat();
+            if (document.body) insertFloat();
         } else {
             syncEggFromStore();
             setFloatPosition();
@@ -924,10 +890,10 @@ function mergeRemoteStore(newValue) {
         syncEggUi();
         return;
     }
-    var normalized;
+    let normalized;
     try {
         normalized = parseEehStore(JSON.parse(newValue));
-    } catch (err) {
+    } catch {
         return;
     }
     applyStoreToGlobals(normalized);
@@ -935,78 +901,74 @@ function mergeRemoteStore(newValue) {
     syncEggUi();
 }
 
-window.addEventListener(
-    "storage",
-    function (storageEvent) {
-        if (storageEvent.key !== EEH_STORE_KEY || storageEvent.storageArea !== localStorage) return;
-        mergeRemoteStore(storageEvent.newValue);
-    },
-    false,
-);
+window.addEventListener("storage", (storageEvent) => {
+    if (storageEvent.key !== EEH_STORE_KEY || storageEvent.storageArea !== localStorage) return;
+    mergeRemoteStore(storageEvent.newValue);
+}, false);
 
 // Drop our block under Torn's prefs menu - float/sidebar lives next to real settings instead of a forum post.
 function insertPrefsPanel() {
-    if (typeof window.$ !== "function") return;
+    if (!jQueryLoaded()) return;
     if (document.getElementById("eeh-preferences-panel")) return;
 
     insertStyle();
 
-    var $menu = $("#prefs-tab-menu");
+    const $menu = $("#prefs-tab-menu");
     if (!$menu.length) return;
 
-    var $mainWrap = $menu.closest(".preferences-wrap");
+    const $mainWrap = $menu.closest(".preferences-wrap");
     if (!$mainWrap.length) return;
 
-    var panelHtml =
-        '<div id="eeh-preferences-panel" class="preferences-wrap cont-gray border-round eeh-prefs-wrap">' +
-        '<div class="eeh-prefs-tab-title title-black top-round">Heasley\'s Egg Navigator</div>' +
-        '<div class="border-round ui-widget-content ui-corner-bottom eeh-prefs-inner">' +
-        '<div class="eeh-prefs-section">' +
-        '<p class="eeh-prefs-heading t-gray-6 bold">Floating button</p>' +
-        '<div class="m-top10 m-bottom10">' +
-        '<input class="checkbox-css" type="checkbox" id="eeh-prefs-float-enabled" name="eeh-prefs-float-enabled">' +
-        '<label for="eeh-prefs-float-enabled" class="marker-css">Use floating button (off = sidebar)</label>' +
-        "</div>" +
-        '<div class="m-top10 m-bottom10">' +
-        '<input class="checkbox-css" type="checkbox" id="eeh-prefs-show-page-numbers" name="eeh-prefs-show-page-numbers">' +
-        '<label for="eeh-prefs-show-page-numbers" class="marker-css">Show page numbers</label>' +
-        "</div>" +
-        "</div>" +
-        '<div class="eeh-prefs-section">' +
-        '<p class="eeh-prefs-heading t-gray-6 bold">Egg button</p>' +
-        '<div class="m-top10 m-bottom10">' +
-        '<label for="eeh-prefs-reset-hold-ms" class="marker-css">Reset hold duration (ms)</label>' +
-        '<input type="number" class="text" id="eeh-prefs-reset-hold-ms" name="eeh-prefs-reset-hold-ms" min="500" max="120000" step="100">' +
-        "</div>" +
-        "</div>" +
-        '<div class="eeh-prefs-section">' +
-        '<p class="eeh-prefs-heading t-gray-6 bold">Position</p>' +
-        '<div class="m-top10 m-bottom10">' +
-        '<input class="checkbox-css" type="checkbox" id="eeh-prefs-float-drag" name="eeh-prefs-float-drag">' +
-        '<label for="eeh-prefs-float-drag" class="marker-css">Enable dragging (use handle beside button)</label>' +
-        "</div>" +
-        '<ul class="eeh-prefs-list" role="radiogroup">' +
-        '<li class="m-bottom5">' +
-        '<input id="eeh-prefs-corner-bl" class="radio-css" type="radio" name="eeh-prefs-corner" value="0">' +
-        '<label for="eeh-prefs-corner-bl" class="marker-css">Bottom left</label>' +
-        "</li>" +
-        '<li class="m-bottom5">' +
-        '<input id="eeh-prefs-corner-tl" class="radio-css" type="radio" name="eeh-prefs-corner" value="1">' +
-        '<label for="eeh-prefs-corner-tl" class="marker-css">Top left</label>' +
-        "</li>" +
-        '<li class="m-bottom5">' +
-        '<input id="eeh-prefs-corner-br" class="radio-css" type="radio" name="eeh-prefs-corner" value="2">' +
-        '<label for="eeh-prefs-corner-br" class="marker-css">Bottom right</label>' +
-        "</li>" +
-        '<li class="m-bottom5">' +
-        '<input id="eeh-prefs-corner-tr" class="radio-css" type="radio" name="eeh-prefs-corner" value="3">' +
-        '<label for="eeh-prefs-corner-tr" class="marker-css">Top right</label>' +
-        "</li>" +
-        "</ul>" +
-        "</div>" +
-        "</div>" +
-        "</div>" +
-        '<div class="clear"></div>';
+    const panelHtml = `
+        <div id="eeh-preferences-panel" class="preferences-wrap cont-gray border-round eeh-prefs-wrap">
+            <div class="eeh-prefs-tab-title title-black top-round">Heasley's Egg Navigator</div>
+            <div class="border-round ui-widget-content ui-corner-bottom eeh-prefs-inner">
+                <div class="eeh-prefs-section">
+                    <p class="eeh-prefs-heading t-gray-6 bold">Floating button</p>
+                    <div class="m-top10 m-bottom10">
+                        <input class="checkbox-css" type="checkbox" id="eeh-prefs-float-enabled" name="eeh-prefs-float-enabled">
+                        <label for="eeh-prefs-float-enabled" class="marker-css">Use floating button (off = sidebar)</label>
+                    </div>
+                    <div class="m-top10 m-bottom10">
+                        <input class="checkbox-css" type="checkbox" id="eeh-prefs-show-page-numbers" name="eeh-prefs-show-page-numbers">
+                        <label for="eeh-prefs-show-page-numbers" class="marker-css">Show page numbers</label>
+                    </div>
+                </div>
+                <div class="eeh-prefs-section">
+                    <p class="eeh-prefs-heading t-gray-6 bold">Egg button</p>
+                    <div class="m-top10 m-bottom10">
+                        <label for="eeh-prefs-reset-hold-ms" class="marker-css">Reset hold duration (ms)</label>
+                        <input type="number" class="text" id="eeh-prefs-reset-hold-ms" name="eeh-prefs-reset-hold-ms" min="500" max="120000" step="100">
+                    </div>
+                </div>
+                <div class="eeh-prefs-section">
+                    <p class="eeh-prefs-heading t-gray-6 bold">Position</p>
+                    <div class="m-top10 m-bottom10">
+                        <input class="checkbox-css" type="checkbox" id="eeh-prefs-float-drag" name="eeh-prefs-float-drag">
+                        <label for="eeh-prefs-float-drag" class="marker-css">Enable dragging (use handle beside button)</label>
+                    </div>
+                    <ul class="eeh-prefs-list" role="radiogroup">
+                        <li class="m-bottom5">
+                            <input id="eeh-prefs-corner-bl" class="radio-css" type="radio" name="eeh-prefs-corner" value="0">
+                            <label for="eeh-prefs-corner-bl" class="marker-css">Bottom left</label>
+                        </li>
+                        <li class="m-bottom5">
+                            <input id="eeh-prefs-corner-tl" class="radio-css" type="radio" name="eeh-prefs-corner" value="1">
+                            <label for="eeh-prefs-corner-tl" class="marker-css">Top left</label>
+                        </li>
+                        <li class="m-bottom5">
+                            <input id="eeh-prefs-corner-br" class="radio-css" type="radio" name="eeh-prefs-corner" value="2">
+                            <label for="eeh-prefs-corner-br" class="marker-css">Bottom right</label>
+                        </li>
+                        <li class="m-bottom5">
+                            <input id="eeh-prefs-corner-tr" class="radio-css" type="radio" name="eeh-prefs-corner" value="3">
+                            <label for="eeh-prefs-corner-tr" class="marker-css">Top right</label>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="clear"></div>`.replace(/>\s+</g, "><");
 
     $mainWrap.after(panelHtml);
 
@@ -1016,8 +978,8 @@ function insertPrefsPanel() {
 }
 
 function insertStyle() {
-    if (window.__eeh_styles_injected) return;
-    window.__eeh_styles_injected = true;
+    if (eeh_styles_injected) return;
+    eeh_styles_injected = true;
     GM.addStyle(`
 .eeh-link {
   background-color: var(--default-bg-panel-color);
@@ -1485,19 +1447,15 @@ function setFloatPosition() {
 
     if (eeh_float_x != null && eeh_float_y != null) {
         floatWrap.classList.add("eeh-float-custom");
-        floatWrap.style.setProperty("left", eeh_float_x + "px", "important");
-        floatWrap.style.setProperty("top", eeh_float_y + "px", "important");
-        floatWrap.style.setProperty("right", "auto", "important");
-        floatWrap.style.setProperty("bottom", "auto", "important");
-        var clamped = clampWrapInViewport(floatWrap, eeh_float_x, eeh_float_y);
+        applyWrapPositionPx(floatWrap, eeh_float_x, eeh_float_y, true);
+        const clamped = clampWrapInViewport(floatWrap, eeh_float_x, eeh_float_y);
         if (clamped.left !== eeh_float_x || clamped.top !== eeh_float_y) {
             eeh_float_x = clamped.left;
             eeh_float_y = clamped.top;
-            floatWrap.style.setProperty("left", clamped.left + "px", "important");
-            floatWrap.style.setProperty("top", clamped.top + "px", "important");
+            applyWrapPositionPx(floatWrap, clamped.left, clamped.top, true);
         }
         updateHandleSide(floatWrap);
-        if (typeof window.$ === "function") bindFloatDrag();
+        if (jQueryLoaded()) bindFloatDrag();
         saveEehStore();
         if (eeh_show_page_numbers) {
             ensureFloatOnScreenAfterLayout();
@@ -1528,9 +1486,16 @@ function setFloatPosition() {
     }
 
     if (eeh_float_drag) updateHandleSide(floatWrap);
-    if (typeof window.$ === "function") bindFloatDrag();
+    if (jQueryLoaded()) bindFloatDrag();
     saveEehStore();
     if (eeh_show_page_numbers) {
         ensureFloatOnScreenAfterLayout();
     }
 }
+
+if (typeof GM.registerMenuCommand !== "undefined") {
+    GM.registerMenuCommand("Toggle Floating Button", toggleFloatButton, { autoClose: false });
+    GM.registerMenuCommand("Toggle Float Position", toggleFloatPosition, { autoClose: false });
+}
+
+})();
